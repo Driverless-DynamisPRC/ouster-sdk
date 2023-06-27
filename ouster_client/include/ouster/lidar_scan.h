@@ -452,6 +452,13 @@ class ScanBatcher {
     std::vector<uint8_t> cache;
     bool cached_packet = false;
 
+    bool to_trigger = false;
+    uint32_t encoder_last = 0;
+    uint32_t encoder_trigger_target = 25031; // Target trigger shooting for encoder, see documentation for angle conversion
+    uint32_t encoder_fire_position = 25031; // Target end of pcl for encoder, see documentation for angle conversion
+    uint32_t encoder_max = 2048;    // Full scale 1 round encoder resolution
+    std::chrono::nanoseconds last_timestamp_;
+
    public:
     sensor::packet_format pf;  ///< The packet format object used for decoding
 
@@ -470,6 +477,43 @@ class ScanBatcher {
      * @param[in] info sensor metadata returned from the client.
      */
     ScanBatcher(const sensor::sensor_info& info);
+
+  /**
+ * Trigger threshold
+ * @return true if camera has to be triggered
+ */
+  bool IsToTrigger() const;
+
+  /**
+   * Set to trigger to the given value
+   * @param to_trigger boolean value for triggering
+   */
+  void SetToTrigger(bool to_trigger);
+
+  /**
+   * Set to trigger to the given value
+   * @return last timestamp from lidar
+   */
+  std::chrono::nanoseconds GetLastTimestamp();
+
+  /**
+   * Set the fov angles
+   * @param starting_angle [degrees]
+   */
+  void SetStartingAngle(double starting_angle);
+
+  /**
+   * Set the number of encoder ticks in one revolution
+   * @param ticks number of ticks
+   */
+  void SetEncoderTicksPerRevolution(int ticks);
+
+  /**
+   * Set the triggering angle, starting from final fov angle,
+   * ( positive delta => starting fov direction )
+   * @param angle [degrees]
+   */
+  void SetTriggerAngle(double angle);
 
     /**
      * Add a packet to the scan.

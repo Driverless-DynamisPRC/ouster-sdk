@@ -11,6 +11,7 @@
 #include <cstring>
 #include <type_traits>
 #include <vector>
+#include <iostream>
 
 #include "logging.h"
 #include "ouster/impl/lidar_scan_impl.h"
@@ -551,7 +552,7 @@ bool ScanBatcher::operator()(const uint8_t* packet_buf, LidarScan& ls) {
     const uint16_t f_id = pf.frame_id(packet_buf);
 
     const bool raw_headers = raw_headers_enabled(pf, ls);
-
+//    std::cout<<"frame_id:\t" << ls.frame_id << "f_id:\t" << f_id << std::endl;
     if (ls.frame_id == -1) {
         // expecting to start batching a new scan
         next_valid_m_id = 0;
@@ -565,7 +566,8 @@ bool ScanBatcher::operator()(const uint8_t* packet_buf, LidarScan& ls) {
     } else if (ls.frame_id == static_cast<uint16_t>(f_id + 1)) {
         // drop reordered packets from the previous frame
         return false;
-    } else if (ls.frame_id != f_id) {
+    }
+    else if (ls.frame_id != f_id) {
         // got a packet from a new frame
         for (const auto& field_type : ls) {
             auto end_m_id = next_valid_m_id;
@@ -580,7 +582,7 @@ bool ScanBatcher::operator()(const uint8_t* packet_buf, LidarScan& ls) {
         std::memcpy(cache.data(), packet_buf, cache.size());
         cached_packet = true;
 
-        return true;
+        return false;
     }
 
     // parse measurement blocks
@@ -590,6 +592,9 @@ bool ScanBatcher::operator()(const uint8_t* packet_buf, LidarScan& ls) {
         const uint64_t ts = pf.col_timestamp(col_buf);
         const uint32_t status = pf.col_status(col_buf);
         const bool valid = (status & 0x01);
+
+        const std::chrono::nanoseconds timestamp(pf.col_timestamp(col_buf));
+        const uint32_t encoder = pf.col_measurement_id(col_buf);
 
         // drop out-of-bounds data in case of misconfiguration
         if (m_id >= w) continue;
@@ -628,10 +633,76 @@ bool ScanBatcher::operator()(const uint8_t* packet_buf, LidarScan& ls) {
         ls.status()[m_id] = status;
 
         impl::foreach_field(ls, parse_field_col(), m_id, pf, col_buf);
+
+        if(encoder_last <= encoder_trigger_target && encoder > encoder_trigger_target) {
+          to_trigger = true;
+//                std::cout << "trigger: " << encoder << std::endl;
+//                std::cout << "Triggering @ " << encoder << " target: " << encoder_trigger_target << std::endl;
+        }
+//        std::cout << "encoder: " << encoder << "encoder last:\t" << encoder_last << std::endl;
+        if (encoder >= encoder_fire_position && encoder_last < encoder_fire_position) {
+          encoder_last = encoder;
+          last_timestamp_ = timestamp;
+          return true;
+        }
+        encoder_last = encoder;
+
+//        if (encoder >= encoder_fire_position && encoder_last < encoder_fire_position) {
+//          encoder_last = encoder + 100;
+//              std::cout << "fire: " << encoder << std::endl;
+//          // got a packet from a new frame
+//          for (const auto& field_type : ls) {
+//            auto end_m_id = next_valid_m_id;
+//            if (raw_headers && field_type.first == ChanField::RAW_HEADERS) {
+//              end_m_id = next_headers_m_id;
+//            }
+//            impl::visit_field(ls, field_type.first, zero_field_cols(),
+//                              field_type.first, end_m_id, w);
+//          }
+
+//          zero_header_cols(ls, next_valid_m_id, w);
+//          std::memcpy(cache.data(), packet_buf, cache.size());
+//          cached_packet = true;
+//          last_timestamp_ = timestamp;
+//          return true;
+//      }
+//      else{
+//        encoder_last = encoder;
+//      }
     }
 
     return false;
 }
+
+void ScanBatcher::SetStartingAngle(double starting_angle){
+  encoder_fire_position = (int) ((1- (starting_angle+1.5)/360.0) * encoder_max);
+  std::cout<<"encoder_fire_position" << encoder_fire_position << std::endl;
+}
+
+void ScanBatcher::SetEncoderTicksPerRevolution(int ticks){
+  encoder_max = ticks;
+}
+
+void ScanBatcher::SetTriggerAngle(double angle){
+  encoder_trigger_target = (int) ((1- (angle+1.5)/360.0) * encoder_max);
+  std::cout<<"encoder_trigger_target" << encoder_trigger_target << std::endl;
+
+//        (int) (delta / 360.0 * encoder_max);
+}
+
+bool ScanBatcher::IsToTrigger() const {
+  return to_trigger;
+}
+
+
+void ScanBatcher::SetToTrigger(bool has_to_trigger) {
+  ScanBatcher::to_trigger = has_to_trigger;
+}
+
+std::chrono::nanoseconds ScanBatcher::GetLastTimestamp() {
+  return last_timestamp_;
+}
+
 
 std::string to_string(const Imu& imu) {
     std::stringstream ss;
