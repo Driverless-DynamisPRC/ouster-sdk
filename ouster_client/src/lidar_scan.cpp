@@ -593,7 +593,7 @@ bool ScanBatcher::operator()(const uint8_t* packet_buf, LidarScan& ls) {
         const uint32_t status = pf.col_status(col_buf);
         const bool valid = (status & 0x01);
 
-        const std::chrono::nanoseconds timestamp(pf.col_timestamp(col_buf));
+//        const std::chrono::nanoseconds timestamp(pf.col_timestamp(col_buf));
         const uint32_t encoder = pf.col_measurement_id(col_buf);
 
         // drop out-of-bounds data in case of misconfiguration
@@ -642,7 +642,7 @@ bool ScanBatcher::operator()(const uint8_t* packet_buf, LidarScan& ls) {
 //        std::cout << "encoder: " << encoder << "encoder last:\t" << encoder_last << std::endl;
         if (encoder >= encoder_fire_position && encoder_last < encoder_fire_position) {
           encoder_last = encoder;
-          last_timestamp_ = timestamp;
+          last_timestamp_ = ros::Time::now();
           return true;
         }
         encoder_last = encoder;
@@ -699,7 +699,7 @@ void ScanBatcher::SetToTrigger(bool has_to_trigger) {
   ScanBatcher::to_trigger = has_to_trigger;
 }
 
-std::chrono::nanoseconds ScanBatcher::GetLastTimestamp() {
+ros::Time ScanBatcher::GetLastTimestamp() {
   return last_timestamp_;
 }
 
