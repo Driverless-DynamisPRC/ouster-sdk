@@ -642,7 +642,8 @@ bool ScanBatcher::operator()(const uint8_t* packet_buf, LidarScan& ls) {
 //        std::cout << "encoder: " << encoder << "encoder last:\t" << encoder_last << std::endl;
         if (encoder >= encoder_fire_position && encoder_last < encoder_fire_position) {
           encoder_last = encoder;
-          last_timestamp_ = ros::Time::now();
+          // std chrono
+          last_timestamp_ = std::chrono::high_resolution_clock::now();
           return true;
         }
         encoder_last = encoder;
@@ -699,7 +700,7 @@ void ScanBatcher::SetToTrigger(bool has_to_trigger) {
   ScanBatcher::to_trigger = has_to_trigger;
 }
 
-ros::Time ScanBatcher::GetLastTimestamp() {
+auto ScanBatcher::GetLastTimestamp() {
   return last_timestamp_;
 }
 

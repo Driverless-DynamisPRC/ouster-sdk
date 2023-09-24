@@ -13,7 +13,6 @@
 #include <type_traits>
 #include <utility>
 #include <vector>
-#include <ros/ros.h>
 
 #include "ouster/types.h"
 
@@ -458,7 +457,7 @@ class ScanBatcher {
     uint32_t encoder_trigger_target = 25031; // Target trigger shooting for encoder, see documentation for angle conversion
     uint32_t encoder_fire_position = 25031; // Target end of pcl for encoder, see documentation for angle conversion
     uint32_t encoder_max = 2048;    // Full scale 1 round encoder resolution
-    ros::Time last_timestamp_;
+    std::chrono::time_point<std::chrono::system_clock> last_timestamp_;
 
    public:
     sensor::packet_format pf;  ///< The packet format object used for decoding
@@ -495,7 +494,7 @@ class ScanBatcher {
    * Set to trigger to the given value
    * @return last timestamp from lidar
    */
-  ros::Time GetLastTimestamp();
+  auto GetLastTimestamp();
 
   /**
    * Set the fov angles
