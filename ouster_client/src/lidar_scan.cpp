@@ -11,6 +11,7 @@
 #include <cstring>
 #include <type_traits>
 #include <vector>
+#include <iostream>
 
 #include "logging.h"
 #include "ouster/impl/lidar_scan_impl.h"
