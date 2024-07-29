@@ -491,6 +491,8 @@ class ScanBatcher {
     uint16_t next_valid_m_id;
     uint16_t next_headers_m_id;
     uint16_t next_valid_packet_id;
+    uint16_t fire_m_id_{768};
+    uint16_t prev_first_col_m_id_{0};
     std::vector<uint8_t> cache;
     uint64_t cache_packet_ts;
     bool cached_packet = false;
@@ -553,6 +555,8 @@ class ScanBatcher {
      */
     bool operator()(const uint8_t* packet_buf, uint64_t packet_ts,
                     LidarScan& ls);
+
+    void set_fire_angle(double fire_angle);
 };
 
 }  // namespace ouster

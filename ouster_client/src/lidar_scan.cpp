@@ -759,7 +759,7 @@ bool ScanBatcher::operator()(const uint8_t* packet_buf, uint64_t packet_ts,
         cache_packet_ts = packet_ts;
         cached_packet = true;
 
-        return true;
+        return false;
     }
 
     // handling packet level data: packet_timestamp
@@ -797,7 +797,22 @@ bool ScanBatcher::operator()(const uint8_t* packet_buf, uint64_t packet_ts,
         _parse_by_col(packet_buf, ls);
     }
 
+    const uint8_t *first_col_buf = pf.nth_col(pf.columns_per_packet - 1, packet_buf);
+    const uint16_t first_col_m_id = pf.col_measurement_id(first_col_buf);
+
+    if (first_col_m_id >= fire_m_id_ && prev_first_col_m_id_ < fire_m_id_) {
+        prev_first_col_m_id_ = first_col_m_id;
+        return true;
+    }
+    prev_first_col_m_id_ = first_col_m_id;
+
     return false;
+}
+
+void ScanBatcher::set_fire_angle(double fire_angle) {
+    fire_m_id_ = w * (1 - fire_angle / 360.0);
+    std::cout << "fire_angle: " << fire_angle << std::endl;
+    std::cout << "fire_m_id: " << fire_m_id_ << std::endl;
 }
 
 }  // namespace ouster
