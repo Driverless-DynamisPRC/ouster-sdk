@@ -282,6 +282,21 @@ void foreach_field(SCAN&& ls, OP&& op, Args&&... args) {
                     ft.first, std::forward<Args>(args)...);
 }
 
+/*
+ * Call a generic operation op<T>(f, Args...) for each parsed channel field of
+ * the lidar scan with type parameter T having the correct field type
+ */
+template <typename SCAN, typename OP, typename... Args>
+void foreach_channel_field(SCAN&& ls, const sensor::packet_format& pf, OP&& op,
+                           Args&&... args) {
+    for (const auto& ft : pf) {
+        if (ls.field_type(ft.first)) {
+            visit_field(ls, ft.first, std::forward<OP>(op), ft.first,
+                        std::forward<Args>(args)...);
+        }
+    }
+}
+
 // Read LidarScan field and cast to the destination
 struct read_and_cast {
     template <typename T, typename U>

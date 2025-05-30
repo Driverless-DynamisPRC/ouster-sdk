@@ -517,10 +517,37 @@ ScanBatcher::ScanBatcher(size_t w, const sensor::packet_format& pf)
       pf(pf) {
     if (pf.columns_per_packet == 0)
         throw std::invalid_argument("unexpected columns_per_packet: 0");
+    // Since we don't know the azimuth window, assume it is full.
+    const size_t desired_w =
+        w / pf.columns_per_packet + (w % pf.columns_per_packet ? 1 : 0);
+    expected_packets = desired_w;
 }
 
 ScanBatcher::ScanBatcher(const sensor::sensor_info& info)
-    : ScanBatcher(info.format.columns_per_frame, sensor::get_format(info)) {}
+: ScanBatcher(info.format.columns_per_frame, sensor::get_format(info)) {
+    // Calculate the number of packets required to have a complete scan
+    int max_packets = expected_packets;
+    if (info.format.column_window.second < info.format.column_window.first) {
+        // the valid azimuth window wraps through 0
+        int start_packet =
+            info.format.column_window.second / pf.columns_per_packet;
+        int end_packet =
+            info.format.column_window.first / pf.columns_per_packet;
+        expected_packets = start_packet + 1 + (max_packets - end_packet);
+        // subtract one if start and end are in the same block
+        if (start_packet == end_packet) {
+            expected_packets -= 1;
+        }
+    } else {
+        // no wrapping of azimuth the window through 0
+        int start_packet =
+            info.format.column_window.first / pf.columns_per_packet;
+        int end_packet =
+            info.format.column_window.second / pf.columns_per_packet;
+
+        expected_packets = end_packet - start_packet + 1;
+    }
+}
 
 namespace {
 
@@ -749,51 +776,66 @@ bool ScanBatcher::operator()(const ouster::sensor::LidarPacket& packet,
     return (*this)(packet.buf.data(), packet.host_timestamp, ls);
 }
 
+void ScanBatcher::finalize_scan(LidarScan& ls, bool raw_headers) {
+    impl::foreach_channel_field(ls, pf, zero_field_cols(), next_valid_m_id, w);
+
+    if (raw_headers) {
+        impl::visit_field(ls, sensor::ChanField::RAW_HEADERS, zero_field_cols(),
+                          sensor::ChanField::RAW_HEADERS, next_headers_m_id, w);
+    }
+}
+
 bool ScanBatcher::operator()(const uint8_t* packet_buf, uint64_t packet_ts,
                              LidarScan& ls) {
     if (ls.w != w || ls.h != h)
         throw std::invalid_argument("unexpected scan dimensions");
-    if (ls.packet_timestamp().rows() != ls.w / pf.columns_per_packet)
+    if (static_cast<size_t>(ls.packet_timestamp().rows()) !=
+        ls.w / pf.columns_per_packet)
         throw std::invalid_argument("unexpected scan columns_per_packet: " +
                                     std::to_string(pf.columns_per_packet));
 
     // process cached packet and packet ts
     if (cached_packet) {
         cached_packet = false;
-        ls.frame_id = -1;
         this->operator()(cache.data(), cache_packet_ts, ls);
     }
 
-    const uint64_t f_id = pf.frame_id(packet_buf);
+    const int64_t f_id = pf.frame_id(packet_buf);
 
     const bool raw_headers = impl::raw_headers_enabled(pf, ls);
 
-    if (ls.frame_id == -1) {
+    if (ls.frame_id == -1 || finished_scan_id >= 0) {
         // expecting to start batching a new scan
+        if (finished_scan_id >= 0) {
+            // drop duplicate or packets from previous frame
+            if (finished_scan_id == f_id) {
+                // drop old duplicate packets
+                return false;
+            } else if (finished_scan_id ==
+                       ((f_id + 1) %
+                        (static_cast<int64_t>(pf.max_frame_id) + 1))) {
+                // drop reordered packets from the previous frame
+                return false;
+            }
+        }
+        finished_scan_id = -1;
         next_valid_m_id = 0;
         next_headers_m_id = 0;
+        batched_packets = 0;
         ls.frame_id = f_id;
         zero_header_cols(ls, 0, w);
         ls.packet_timestamp().setZero();
         const uint8_t f_thermal_shutdown = pf.thermal_shutdown(packet_buf);
         const uint8_t f_shot_limiting = pf.shot_limiting(packet_buf);
         ls.frame_status = frame_status(f_thermal_shutdown, f_shot_limiting);
-    } else if (ls.frame_id == ((f_id + 1) % (pf.max_frame_id + 1))) {
+    } else if (ls.frame_id ==
+               ((f_id + 1) % (static_cast<int64_t>(pf.max_frame_id) + 1))) {
         // drop reordered packets from the previous frame
         return false;
     } else if (ls.frame_id != f_id) {
-        // got a packet from a new frame
-        for (const auto& field_type : ls) {
-            auto end_m_id = next_valid_m_id;
-            if (raw_headers && field_type.first == ChanField::RAW_HEADERS) {
-                end_m_id = next_headers_m_id;
-            }
-            if (field_type.first >= ChanField::CUSTOM0 &&
-                field_type.first <= ChanField::CUSTOM9)
-                continue;
-            impl::visit_field(ls, field_type.first, zero_field_cols(),
-                              field_type.first, end_m_id, w);
-        }
+        // got a packet from a new frame, release the old one
+        finished_scan_id = ls.frame_id;
+        finalize_scan(ls, raw_headers);
 
         // store packet buf and ts data to the cache for later processing
         std::memcpy(cache.data(), packet_buf, cache.size());
@@ -802,6 +844,8 @@ bool ScanBatcher::operator()(const uint8_t* packet_buf, uint64_t packet_ts,
 
         return true;
     }
+
+    batched_packets++;
 
     // handling packet level data: packet_timestamp
     const uint8_t* col0_buf = pf.nth_col(0, packet_buf);
@@ -829,6 +873,14 @@ bool ScanBatcher::operator()(const uint8_t* packet_buf, uint64_t packet_ts,
         _parse_by_block(packet_buf, ls);
     } else {
         _parse_by_col(packet_buf, ls);
+    }
+
+    // if we have enough packets and are packet-complete release the scan
+    if (batched_packets >= expected_packets &&
+        (size_t)ls.packet_timestamp().count() == expected_packets) {
+        finished_scan_id = f_id;
+        finalize_scan(ls, raw_headers);
+        return true;
     }
 
     return false;

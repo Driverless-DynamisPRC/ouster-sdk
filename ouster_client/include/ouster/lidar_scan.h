@@ -517,17 +517,21 @@ inline img_t<T> stagger(const Eigen::Ref<const img_t<T>>& img,
  * LidarScan.
  */
 class ScanBatcher {
-    std::ptrdiff_t w;
-    std::ptrdiff_t h;
+    size_t w;
+    size_t h;
     uint16_t next_valid_m_id;
     uint16_t next_headers_m_id;
     uint16_t next_valid_packet_id;
     std::vector<uint8_t> cache;
     uint64_t cache_packet_ts;
     bool cached_packet = false;
+    int64_t finished_scan_id = -1;
+    size_t expected_packets;
+    size_t batched_packets = 0;
 
     void _parse_by_col(const uint8_t* packet_buf, LidarScan& ls);
     void _parse_by_block(const uint8_t* packet_buf, LidarScan& ls);
+    void finalize_scan(LidarScan& ls, bool raw_headers);
 
    public:
     sensor::packet_format pf;  ///< The packet format object used for decoding
