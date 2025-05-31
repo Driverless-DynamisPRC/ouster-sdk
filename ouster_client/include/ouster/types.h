@@ -1025,6 +1025,7 @@ class packet_format {
 
     template <typename T, typename SRC, int N>
     void block_field_impl(Eigen::Ref<img_t<T>> field, ChanField i,
+                          size_t start_h, size_t end_h,
                           const uint8_t* packet_buf) const;
 
     struct Impl;
@@ -1220,8 +1221,8 @@ class packet_format {
      */
     template <typename T,
               typename std::enable_if<std::is_unsigned<T>::value, T>::type = 0>
-    void col_field(const uint8_t* col_buf, ChanField f, T* dst,
-                   int dst_stride = 1) const;
+    void col_field(const uint8_t* col_buf, ChanField f, size_t start_h,
+                   size_t end_h, T* dst, int dst_stride = 1) const;
 
     /**
      * Returns maximum available size of parsing block usable with block_field
@@ -1244,8 +1245,8 @@ class packet_format {
      */
     template <typename T, int BlockDim,
               typename std::enable_if<std::is_unsigned<T>::value, T>::type = 0>
-    void block_field(Eigen::Ref<img_t<T>> field, ChanField f,
-                     const uint8_t* lidar_buf) const;
+    void block_field(Eigen::Ref<img_t<T>> field, ChanField f, size_t start_h,
+                     size_t end_h, const uint8_t* lidar_buf) const;
 
     // Per-pixel channel data block accessors
     /**
