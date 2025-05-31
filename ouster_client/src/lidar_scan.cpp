@@ -521,10 +521,14 @@ ScanBatcher::ScanBatcher(size_t w, const sensor::packet_format& pf)
     const size_t desired_w =
         w / pf.columns_per_packet + (w % pf.columns_per_packet ? 1 : 0);
     expected_packets = desired_w;
+    // Since we don't know the horizon window, assume it is full.
+    start_pixel = 0;
+    end_pixel = pf.pixels_per_column;
 }
 
-ScanBatcher::ScanBatcher(const sensor::sensor_info& info)
-: ScanBatcher(info.format.columns_per_frame, sensor::get_format(info)) {
+ScanBatcher::ScanBatcher(const sensor::sensor_info& info, size_t start_pixel,
+                         size_t end_pixel)
+    : ScanBatcher(info.format.columns_per_frame, sensor::get_format(info)) {
     // Calculate the number of packets required to have a complete scan
     int max_packets = expected_packets;
     if (info.format.column_window.second < info.format.column_window.first) {
@@ -547,6 +551,9 @@ ScanBatcher::ScanBatcher(const sensor::sensor_info& info)
 
         expected_packets = end_packet - start_packet + 1;
     }
+
+    this->start_pixel = start_pixel;
+    this->end_pixel = end_pixel;
 }
 
 namespace {
@@ -578,8 +585,8 @@ void zero_header_cols(LidarScan& ls, std::ptrdiff_t start, std::ptrdiff_t end) {
 struct parse_field_col {
     template <typename T>
     void operator()(Eigen::Ref<img_t<T>> field, ChanField f, uint16_t m_id,
-                    const sensor::packet_format& pf,
-                    const uint8_t* col_buf) const {
+                    const sensor::packet_format& pf, size_t start_pixel,
+                    size_t end_pixel, const uint8_t* col_buf) const {
         // user defined fields that we shouldn't change
         if (f >= ChanField::CUSTOM0 && f <= ChanField::CUSTOM9) return;
 
@@ -588,7 +595,8 @@ struct parse_field_col {
         // model (i.e. data packed per column rather than per pixel)
         if (f == ChanField::RAW_HEADERS) return;
 
-        pf.col_field(col_buf, f, field.col(m_id).data(), field.cols());
+        pf.col_field(col_buf, f, start_pixel, end_pixel, field.col(m_id).data(),
+                     field.cols());
     }
 };
 
@@ -703,7 +711,8 @@ void ScanBatcher::_parse_by_col(const uint8_t* packet_buf, LidarScan& ls) {
         ls.measurement_id()[m_id] = m_id;
         ls.status()[m_id] = status;
 
-        impl::foreach_field(ls, parse_field_col(), m_id, pf, col_buf);
+        impl::foreach_field(ls, parse_field_col(), m_id, pf, start_pixel,
+                            end_pixel, col_buf);
     }
 }
 
@@ -715,12 +724,13 @@ template <int BlockDim>
 struct parse_field_block {
     template <typename T>
     void operator()(Eigen::Ref<img_t<T>> field, ChanField f,
-                    const sensor::packet_format& pf,
-                    const uint8_t* packet_buf) const {
+                    const sensor::packet_format& pf, size_t start_pixel,
+                    size_t end_pixel, const uint8_t* packet_buf) const {
         // user defined fields that we shouldn't change
         if (f >= ChanField::CUSTOM0 && f <= ChanField::CUSTOM9) return;
 
-        pf.block_field<T, BlockDim>(field, f, packet_buf);
+        pf.block_field<T, BlockDim>(field, f, start_pixel, end_pixel,
+                                    packet_buf);
     }
 };
 
@@ -754,13 +764,16 @@ void ScanBatcher::_parse_by_block(const uint8_t* packet_buf, LidarScan& ls) {
 
     switch (pf.block_parsable()) {
         case 16:
-            impl::foreach_field(ls, parse_field_block<16>{}, pf, packet_buf);
+            impl::foreach_field(ls, parse_field_block<16>{}, pf, start_pixel,
+                                end_pixel, packet_buf);
             break;
         case 8:
-            impl::foreach_field(ls, parse_field_block<8>{}, pf, packet_buf);
+            impl::foreach_field(ls, parse_field_block<8>{}, pf, start_pixel,
+                                end_pixel, packet_buf);
             break;
         case 4:
-            impl::foreach_field(ls, parse_field_block<4>{}, pf, packet_buf);
+            impl::foreach_field(ls, parse_field_block<4>{}, pf, start_pixel,
+                                end_pixel, packet_buf);
             break;
         default:
             throw std::invalid_argument("Invalid block dim for packet format");
