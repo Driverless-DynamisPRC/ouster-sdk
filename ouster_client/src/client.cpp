@@ -6,6 +6,8 @@
 #include "ouster/client.h"
 
 #include <json/json.h>
+#include <linux/sockios.h>
+#include <sys/ioctl.h>
 
 #include <algorithm>
 #include <cctype>
@@ -42,6 +44,8 @@ struct client {
     SOCKET imu_fd;
     std::string hostname;
     Json::Value meta;
+    struct ::timeval last_lidar_packet_timestamp;
+    struct ::timeval last_imu_packet_timestamp;
     ~client() {
         impl::socket_close(lidar_fd);
         impl::socket_close(imu_fd);
@@ -590,18 +594,44 @@ int poll(client_poller& poller, int timeout_sec) {
 
 client_state get_error(const client_poller& poller) { return poller.err; }
 
-client_state get_poll(const client_poller& poller, const client& c) {
+client_state get_poll(const client_poller& poller, client& c) {
     client_state s = client_state(0);
 
-    if (FD_ISSET(c.lidar_fd, &poller.rfds)) s = client_state(s | LIDAR_DATA);
-    if (FD_ISSET(c.imu_fd, &poller.rfds)) s = client_state(s | IMU_DATA);
+    if (FD_ISSET(c.lidar_fd, &poller.rfds)) {
+        s = client_state(s | LIDAR_DATA);
+
+        if (::ioctl(c.lidar_fd, SIOCGSTAMP, &c.last_lidar_packet_timestamp) != 0) {
+            const auto now = clock::now().time_since_epoch();
+            const auto sec = std::chrono::duration_cast<std::chrono::seconds>(now);
+            const auto usec = std::chrono::duration_cast<std::chrono::microseconds>(now - sec);
+
+            c.last_lidar_packet_timestamp.tv_sec = sec.count();
+            c.last_lidar_packet_timestamp.tv_usec = usec.count();
+
+            logger().warn("Could not get last lidar packet stamp (err={}: {})", errno, std::strerror(errno));
+        }
+    }
+    if (FD_ISSET(c.imu_fd, &poller.rfds)) {
+        s = client_state(s | IMU_DATA);
+
+        if (::ioctl(c.imu_fd, SIOCGSTAMP, &c.last_imu_packet_timestamp) != 0) {
+            const auto now = clock::now().time_since_epoch();
+            const auto sec = std::chrono::duration_cast<std::chrono::seconds>(now);
+            const auto usec = std::chrono::duration_cast<std::chrono::microseconds>(now - sec);
+
+            c.last_imu_packet_timestamp.tv_sec = sec.count();
+            c.last_imu_packet_timestamp.tv_usec = usec.count();
+
+            logger().warn("Could not get last imu packet stamp (err={}: {})", errno, std::strerror(errno));
+        }
+    }
 
     return s;
 }
 
 }  // namespace impl
 
-client_state poll_client(const client& c, const int timeout_sec) {
+client_state poll_client(client& c, const int timeout_sec) {
     impl::client_poller poller;
     impl::reset_poll(poller);
     impl::set_poll(poller, c);
@@ -639,10 +669,8 @@ bool read_lidar_packet(const client& cli, uint8_t* buf,
 }
 
 bool read_lidar_packet(const client& cli, LidarPacket& packet) {
-    auto now = std::chrono::high_resolution_clock::now();
-    packet.host_timestamp =
-        std::chrono::duration_cast<std::chrono::nanoseconds>(
-            now.time_since_epoch())
+    packet.host_timestamp = std::chrono::duration_cast<std::chrono::nanoseconds>(
+            get_last_lidar_packet_timestamp(cli).time_since_epoch())
             .count();
     return read_lidar_packet(cli, packet.buf.data(), packet.buf.size());
 }
@@ -656,10 +684,9 @@ bool read_imu_packet(const client& cli, uint8_t* buf, const packet_format& pf) {
 }
 
 bool read_imu_packet(const client& cli, ImuPacket& packet) {
-    auto now = std::chrono::high_resolution_clock::now();
     packet.host_timestamp =
         std::chrono::duration_cast<std::chrono::nanoseconds>(
-            now.time_since_epoch())
+            get_last_imu_packet_timestamp(cli).time_since_epoch())
             .count();
     return read_imu_packet(cli, packet.buf.data(), packet.buf.size());
 }
@@ -671,6 +698,19 @@ int get_imu_port(const client& cli) { return get_sock_port(cli.imu_fd); }
 bool in_multicast(const std::string& addr) {
     return IN_MULTICAST(ntohl(inet_addr(addr.c_str())));
 }
+
+time_point get_last_lidar_packet_timestamp(const client& cli) {
+    return time_point(
+        std::chrono::seconds(cli.last_lidar_packet_timestamp.tv_sec)
+        + std::chrono::microseconds(cli.last_lidar_packet_timestamp.tv_usec));
+}
+
+time_point get_last_imu_packet_timestamp(const client& cli) {
+    return time_point(
+        std::chrono::seconds(cli.last_imu_packet_timestamp.tv_sec) +
+        std::chrono::microseconds(cli.last_imu_packet_timestamp.tv_usec));
+}
+
 
 /**
  * Return the socket file descriptor used to listen for lidar UDP data.

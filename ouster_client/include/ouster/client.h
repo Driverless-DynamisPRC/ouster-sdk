@@ -20,6 +20,9 @@
 namespace ouster {
 namespace sensor {
 
+using clock = std::chrono::high_resolution_clock;
+using time_point = clock::time_point;
+
 struct client;
 
 /** Returned by poll_client. */
@@ -141,7 +144,7 @@ std::shared_ptr<client> mtp_init_client(
  * LIDAR_DATA) is true if lidar data is ready to read, and (s & IMU_DATA) is
  * true if imu data is ready to read.
  */
-client_state poll_client(const client& cli, int timeout_sec = 1);
+client_state poll_client(client& cli, int timeout_sec = 1);
 
 /**
  * Read lidar data from the sensor. Will not block.
@@ -310,6 +313,10 @@ int get_imu_port(const client& cli);
  * @return true if addr is in multicast range.
  */
 bool in_multicast(const std::string& addr);
+
+time_point get_last_lidar_packet_timestamp(const client& cli);
+
+time_point get_last_imu_packet_timestamp(const client& cli);
 
 }  // namespace sensor
 }  // namespace ouster

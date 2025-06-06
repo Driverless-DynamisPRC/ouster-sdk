@@ -63,7 +63,7 @@ client_state get_error(const client_poller& poller);
  * @return client_state comprising of either LIDAR_DATA or IMU_DATA, or TIMEOUT
  *         if no data was received
  */
-client_state get_poll(const client_poller& poller, const client& cli);
+client_state get_poll(const client_poller& poller, client& cli);
 
 }  // namespace impl
 }  // namespace sensor
