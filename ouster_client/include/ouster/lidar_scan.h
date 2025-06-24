@@ -526,8 +526,8 @@ class ScanBatcher {
     uint64_t cache_packet_ts;
     bool cached_packet = false;
     int64_t finished_scan_id = -1;
-    size_t expected_packets;
-    size_t batched_packets = 0;
+    size_t start_col;
+    size_t end_col;
 
     void _parse_by_col(const uint8_t* packet_buf, LidarScan& ls);
     void _parse_by_block(const uint8_t* packet_buf, LidarScan& ls);

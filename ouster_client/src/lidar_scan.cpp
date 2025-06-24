@@ -9,10 +9,12 @@
 #include <cmath>
 #include <cstddef>
 #include <cstring>
+#include <iostream>
 #include <type_traits>
 #include <vector>
 
 #include "logging.h"
+#include "ouster/impl/column_window.h"
 #include "ouster/impl/lidar_scan_impl.h"
 #include "ouster/types.h"
 
@@ -518,35 +520,17 @@ ScanBatcher::ScanBatcher(size_t w, const sensor::packet_format& pf)
     if (pf.columns_per_packet == 0)
         throw std::invalid_argument("unexpected columns_per_packet: 0");
     // Since we don't know the azimuth window, assume it is full.
-    const size_t desired_w =
-        w / pf.columns_per_packet + (w % pf.columns_per_packet ? 1 : 0);
-    expected_packets = desired_w;
+    start_col = 0;
+    end_col = w;
 }
 
 ScanBatcher::ScanBatcher(const sensor::sensor_info& info)
-: ScanBatcher(info.format.columns_per_frame, sensor::get_format(info)) {
+    : ScanBatcher(
+          info.format.columns_per_frame,
+          sensor::get_format(info)) {
     // Calculate the number of packets required to have a complete scan
-    int max_packets = expected_packets;
-    if (info.format.column_window.second < info.format.column_window.first) {
-        // the valid azimuth window wraps through 0
-        int start_packet =
-            info.format.column_window.second / pf.columns_per_packet;
-        int end_packet =
-            info.format.column_window.first / pf.columns_per_packet;
-        expected_packets = start_packet + 1 + (max_packets - end_packet);
-        // subtract one if start and end are in the same block
-        if (start_packet == end_packet) {
-            expected_packets -= 1;
-        }
-    } else {
-        // no wrapping of azimuth the window through 0
-        int start_packet =
-            info.format.column_window.first / pf.columns_per_packet;
-        int end_packet =
-            info.format.column_window.second / pf.columns_per_packet;
-
-        expected_packets = end_packet - start_packet + 1;
-    }
+    start_col = info.format.column_window.first;
+    end_col = info.format.column_window.second;
 }
 
 namespace {
@@ -821,7 +805,6 @@ bool ScanBatcher::operator()(const uint8_t* packet_buf, uint64_t packet_ts,
         finished_scan_id = -1;
         next_valid_m_id = 0;
         next_headers_m_id = 0;
-        batched_packets = 0;
         ls.frame_id = f_id;
         zero_header_cols(ls, 0, w);
         ls.packet_timestamp().setZero();
@@ -845,12 +828,10 @@ bool ScanBatcher::operator()(const uint8_t* packet_buf, uint64_t packet_ts,
         return true;
     }
 
-    batched_packets++;
-
     // handling packet level data: packet_timestamp
     const uint8_t* col0_buf = pf.nth_col(0, packet_buf);
-    const uint16_t packet_id =
-        pf.col_measurement_id(col0_buf) / pf.columns_per_packet;
+    const uint16_t col0_id = pf.col_measurement_id(col0_buf);
+    const uint16_t packet_id = col0_id / pf.columns_per_packet;
     if (packet_id < ls.packet_timestamp().rows()) {
         ls.packet_timestamp()[packet_id] = packet_ts;
     }
@@ -875,9 +856,12 @@ bool ScanBatcher::operator()(const uint8_t* packet_buf, uint64_t packet_ts,
         _parse_by_col(packet_buf, ls);
     }
 
+    const uint8_t* coln_buf = pf.nth_col(pf.columns_per_packet - 1, packet_buf);
+    const uint16_t coln_id = pf.col_measurement_id(coln_buf);
+
     // if we have enough packets and are packet-complete release the scan
-    if (batched_packets >= expected_packets &&
-        (size_t)ls.packet_timestamp().count() == expected_packets) {
+    // std::cout << col0_id << " " << end_col << " " << coln_id << std::endl;
+    if (col0_id <= end_col && end_col <= coln_id) {
         finished_scan_id = f_id;
         finalize_scan(ls, raw_headers);
         return true;
