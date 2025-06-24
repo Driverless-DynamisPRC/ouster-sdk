@@ -526,7 +526,7 @@ ScanBatcher::ScanBatcher(size_t w, const sensor::packet_format& pf)
 
 ScanBatcher::ScanBatcher(const sensor::sensor_info& info)
     : ScanBatcher(
-          info.format.columns_per_frame,
+          info.format.columns_per_packet * get_expected_packets(info),
           sensor::get_format(info)) {
     // Calculate the number of packets required to have a complete scan
     start_col = info.format.column_window.first;
@@ -600,7 +600,7 @@ struct pack_raw_headers_col {
     template <typename T>
     void operator()(Eigen::Ref<img_t<T>> rh_field, ChanField,
                     const sensor::packet_format& pf, uint16_t col_idx,
-                    const uint8_t* packet_buf) const {
+                    size_t col_offset, const uint8_t* packet_buf) const {
         const uint8_t* col_buf = pf.nth_col(col_idx, packet_buf);
         const uint16_t m_id = pf.col_measurement_id(col_buf);
 
@@ -610,22 +610,24 @@ struct pack_raw_headers_col {
         const ColMajorView col_header_vec(reinterpret_cast<const T*>(col_buf),
                                           pf.col_header_size / sizeof(T));
 
-        rh_field.block(0, m_id, col_header_vec.size(), 1) = col_header_vec;
+        rh_field.block(0, m_id - col_offset, col_header_vec.size(), 1) =
+            col_header_vec;
 
         const ColMajorView col_footer_vec(
             reinterpret_cast<const T*>(col_buf + pf.col_size -
                                        pf.col_footer_size),
             pf.col_footer_size / sizeof(T));
 
-        rh_field.block(col_header_vec.size(), m_id, col_footer_vec.size(), 1) =
-            col_footer_vec;
+        rh_field.block(col_header_vec.size(), m_id - col_offset,
+                       col_footer_vec.size(), 1) = col_footer_vec;
 
         const ColMajorView packet_header_vec(
             reinterpret_cast<const T*>(packet_buf),
             pf.packet_header_size / sizeof(T));
 
-        rh_field.block(col_header_vec.size() + col_footer_vec.size(), m_id,
-                       packet_header_vec.size(), 1) = packet_header_vec;
+        rh_field.block(col_header_vec.size() + col_footer_vec.size(),
+                       m_id - col_offset, packet_header_vec.size(), 1) =
+            packet_header_vec;
 
         const ColMajorView packet_footer_vec(
             reinterpret_cast<const T*>(pf.footer(packet_buf)),
@@ -633,7 +635,8 @@ struct pack_raw_headers_col {
 
         rh_field.block(col_header_vec.size() + col_footer_vec.size() +
                            packet_header_vec.size(),
-                       m_id, packet_footer_vec.size(), 1) = packet_footer_vec;
+                       m_id - col_offset, packet_footer_vec.size(), 1) =
+            packet_footer_vec;
     }
 };
 
@@ -655,14 +658,15 @@ void ScanBatcher::_parse_by_col(const uint8_t* packet_buf, LidarScan& ls) {
             // zero out missing columns if we jumped forward
             if (m_id >= next_headers_m_id) {
                 impl::visit_field(ls, ChanField::RAW_HEADERS, zero_field_cols(),
-                                  ChanField::RAW_HEADERS, next_headers_m_id,
-                                  m_id);
+                                  ChanField::RAW_HEADERS,
+                                  next_headers_m_id - start_col,
+                                  m_id - start_col);
                 next_headers_m_id = m_id + 1;
             }
 
             impl::visit_field(ls, ChanField::RAW_HEADERS,
                               pack_raw_headers_col(), ChanField::RAW_HEADERS,
-                              pf, icol, packet_buf);
+                              pf, icol, start_col, packet_buf);
         }
 
         // drop invalid
@@ -676,18 +680,20 @@ void ScanBatcher::_parse_by_col(const uint8_t* packet_buf, LidarScan& ls) {
                     field_type.first <= ChanField::CUSTOM9)
                     continue;
                 impl::visit_field(ls, field_type.first, zero_field_cols(),
-                                  field_type.first, next_valid_m_id, m_id);
+                                  field_type.first, next_valid_m_id - start_col,
+                                  m_id - start_col);
             }
-            zero_header_cols(ls, next_valid_m_id, m_id);
+            zero_header_cols(ls, next_valid_m_id - start_col, m_id - start_col);
             next_valid_m_id = m_id + 1;
         }
 
         // write new header values
-        ls.timestamp()[m_id] = ts;
-        ls.measurement_id()[m_id] = m_id;
-        ls.status()[m_id] = status;
+        ls.timestamp()[m_id - start_col] = ts;
+        ls.measurement_id()[m_id - start_col] = m_id;
+        ls.status()[m_id - start_col] = status;
 
-        impl::foreach_field(ls, parse_field_col(), m_id, pf, col_buf);
+        impl::foreach_field(ls, parse_field_col(), m_id - start_col, pf,
+                            col_buf);
     }
 }
 
@@ -700,11 +706,12 @@ struct parse_field_block {
     template <typename T>
     void operator()(Eigen::Ref<img_t<T>> field, ChanField f,
                     const sensor::packet_format& pf,
-                    const uint8_t* packet_buf) const {
+                    const uint8_t* packet_buf,
+                    size_t col_offset) const {
         // user defined fields that we shouldn't change
         if (f >= ChanField::CUSTOM0 && f <= ChanField::CUSTOM9) return;
 
-        pf.block_field<T, BlockDim>(field, f, packet_buf);
+        pf.block_field<T, BlockDim>(field, f, packet_buf, col_offset);
     }
 };
 
@@ -718,9 +725,11 @@ void ScanBatcher::_parse_by_block(const uint8_t* packet_buf, LidarScan& ls) {
                 field_type.first <= ChanField::CUSTOM9)
                 continue;
             impl::visit_field(ls, field_type.first, zero_field_cols(),
-                              field_type.first, next_valid_m_id, first_m_id);
+                              field_type.first, next_valid_m_id - start_col,
+                              first_m_id - start_col);
         }
-        zero_header_cols(ls, next_valid_m_id, first_m_id);
+        zero_header_cols(ls, next_valid_m_id - start_col,
+                         first_m_id - start_col);
         next_valid_m_id = first_m_id + pf.columns_per_packet;
     }
 
@@ -731,20 +740,20 @@ void ScanBatcher::_parse_by_block(const uint8_t* packet_buf, LidarScan& ls) {
         const uint64_t ts = pf.col_timestamp(col_buf);
         const uint32_t status = pf.col_status(col_buf);
 
-        ls.timestamp()[m_id] = ts;
-        ls.measurement_id()[m_id] = m_id;
-        ls.status()[m_id] = status;
+        ls.timestamp()[m_id - start_col] = ts;
+        ls.measurement_id()[m_id - start_col] = m_id;
+        ls.status()[m_id - start_col] = status;
     }
 
     switch (pf.block_parsable()) {
         case 16:
-            impl::foreach_field(ls, parse_field_block<16>{}, pf, packet_buf);
+            impl::foreach_field(ls, parse_field_block<16>{}, pf, packet_buf, start_col);
             break;
         case 8:
-            impl::foreach_field(ls, parse_field_block<8>{}, pf, packet_buf);
+            impl::foreach_field(ls, parse_field_block<8>{}, pf, packet_buf, start_col);
             break;
         case 4:
-            impl::foreach_field(ls, parse_field_block<4>{}, pf, packet_buf);
+            impl::foreach_field(ls, parse_field_block<4>{}, pf, packet_buf, start_col);
             break;
         default:
             throw std::invalid_argument("Invalid block dim for packet format");
@@ -761,11 +770,13 @@ bool ScanBatcher::operator()(const ouster::sensor::LidarPacket& packet,
 }
 
 void ScanBatcher::finalize_scan(LidarScan& ls, bool raw_headers) {
-    impl::foreach_channel_field(ls, pf, zero_field_cols(), next_valid_m_id, w);
+    impl::foreach_channel_field(ls, pf, zero_field_cols(),
+                                next_valid_m_id - start_col, w);
 
     if (raw_headers) {
         impl::visit_field(ls, sensor::ChanField::RAW_HEADERS, zero_field_cols(),
-                          sensor::ChanField::RAW_HEADERS, next_headers_m_id, w);
+                          sensor::ChanField::RAW_HEADERS,
+                          next_headers_m_id - start_col, w);
     }
 }
 
@@ -803,8 +814,8 @@ bool ScanBatcher::operator()(const uint8_t* packet_buf, uint64_t packet_ts,
             }
         }
         finished_scan_id = -1;
-        next_valid_m_id = 0;
-        next_headers_m_id = 0;
+        next_valid_m_id = start_col;
+        next_headers_m_id = start_col;
         ls.frame_id = f_id;
         zero_header_cols(ls, 0, w);
         ls.packet_timestamp().setZero();
@@ -831,7 +842,7 @@ bool ScanBatcher::operator()(const uint8_t* packet_buf, uint64_t packet_ts,
     // handling packet level data: packet_timestamp
     const uint8_t* col0_buf = pf.nth_col(0, packet_buf);
     const uint16_t col0_id = pf.col_measurement_id(col0_buf);
-    const uint16_t packet_id = col0_id / pf.columns_per_packet;
+    const uint16_t packet_id = (col0_id - start_col) / pf.columns_per_packet;
     if (packet_id < ls.packet_timestamp().rows()) {
         ls.packet_timestamp()[packet_id] = packet_ts;
     }
@@ -844,7 +855,7 @@ bool ScanBatcher::operator()(const uint8_t* packet_buf, uint64_t packet_ts,
         const uint32_t status = pf.col_status(col_buf);
         const bool valid = (status & 0x01);
 
-        if (!valid || m_id >= w) {
+        if (!valid || (m_id - start_col) >= w) {
             happy_packet = false;
             break;
         }

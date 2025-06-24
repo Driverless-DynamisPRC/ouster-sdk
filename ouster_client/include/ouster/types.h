@@ -1025,7 +1025,8 @@ class packet_format {
 
     template <typename T, typename SRC, int N>
     void block_field_impl(Eigen::Ref<img_t<T>> field, ChanField i,
-                          const uint8_t* packet_buf) const;
+                          const uint8_t* packet_buf,
+                          size_t col_offset) const;
 
     struct Impl;
     std::shared_ptr<const Impl> impl_;
@@ -1245,7 +1246,7 @@ class packet_format {
     template <typename T, int BlockDim,
               typename std::enable_if<std::is_unsigned<T>::value, T>::type = 0>
     void block_field(Eigen::Ref<img_t<T>> field, ChanField f,
-                     const uint8_t* lidar_buf) const;
+                     const uint8_t* lidar_buf, size_t col_offset) const;
 
     // Per-pixel channel data block accessors
     /**

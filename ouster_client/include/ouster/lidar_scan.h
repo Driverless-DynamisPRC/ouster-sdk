@@ -552,6 +552,9 @@ class ScanBatcher {
      */
     ScanBatcher(const sensor::sensor_info& info);
 
+    size_t get_w() const { return w; }
+    size_t get_h() const { return h; }
+
     /**
      * Add a packet to the scan.
      * @deprecated this method is deprecated in favor of one that accepts a
