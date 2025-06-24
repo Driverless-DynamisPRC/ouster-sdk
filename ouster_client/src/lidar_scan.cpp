@@ -9,7 +9,6 @@
 #include <cmath>
 #include <cstddef>
 #include <cstring>
-#include <iostream>
 #include <type_traits>
 #include <vector>
 
@@ -522,15 +521,24 @@ ScanBatcher::ScanBatcher(size_t w, const sensor::packet_format& pf)
     // Since we don't know the azimuth window, assume it is full.
     start_col = 0;
     end_col = w;
+    // Since we don't know the horizon window, assume it is full.
+    start_pixel = 0;
+    end_pixel = pf.pixels_per_column;
 }
 
-ScanBatcher::ScanBatcher(const sensor::sensor_info& info)
+ScanBatcher::ScanBatcher(const sensor::sensor_info& info, size_t start_pixel,
+                         size_t end_pixel)
     : ScanBatcher(
           info.format.columns_per_packet * get_expected_packets(info),
           sensor::get_format(info)) {
+    h = end_pixel - start_pixel;
+
     // Calculate the number of packets required to have a complete scan
     start_col = info.format.column_window.first;
     end_col = info.format.column_window.second;
+
+    this->start_pixel = start_pixel;
+    this->end_pixel = end_pixel;
 }
 
 namespace {
@@ -563,7 +571,8 @@ struct parse_field_col {
     template <typename T>
     void operator()(Eigen::Ref<img_t<T>> field, ChanField f, uint16_t m_id,
                     const sensor::packet_format& pf,
-                    const uint8_t* col_buf) const {
+                    const uint8_t* col_buf, size_t col_offset,
+                    size_t start_pixel, size_t end_pixel) const {
         // user defined fields that we shouldn't change
         if (f >= ChanField::CUSTOM0 && f <= ChanField::CUSTOM9) return;
 
@@ -572,7 +581,8 @@ struct parse_field_col {
         // model (i.e. data packed per column rather than per pixel)
         if (f == ChanField::RAW_HEADERS) return;
 
-        pf.col_field(col_buf, f, field.col(m_id).data(), field.cols());
+        pf.col_field(col_buf, f, field.col(m_id - col_offset).data(),
+                     field.cols(), start_pixel, end_pixel);
     }
 };
 
@@ -692,8 +702,8 @@ void ScanBatcher::_parse_by_col(const uint8_t* packet_buf, LidarScan& ls) {
         ls.measurement_id()[m_id - start_col] = m_id;
         ls.status()[m_id - start_col] = status;
 
-        impl::foreach_field(ls, parse_field_col(), m_id - start_col, pf,
-                            col_buf);
+        impl::foreach_field(ls, parse_field_col(), m_id, pf, col_buf, start_col,
+                            start_pixel, end_pixel);
     }
 }
 
@@ -705,13 +715,14 @@ template <int BlockDim>
 struct parse_field_block {
     template <typename T>
     void operator()(Eigen::Ref<img_t<T>> field, ChanField f,
-                    const sensor::packet_format& pf,
-                    const uint8_t* packet_buf,
-                    size_t col_offset) const {
+                    const sensor::packet_format& pf, const uint8_t* packet_buf,
+                    size_t col_offset, size_t start_pixel,
+                    size_t end_pixel) const {
         // user defined fields that we shouldn't change
         if (f >= ChanField::CUSTOM0 && f <= ChanField::CUSTOM9) return;
 
-        pf.block_field<T, BlockDim>(field, f, packet_buf, col_offset);
+        pf.block_field<T, BlockDim>(field, f, packet_buf, col_offset,
+                                    start_pixel, end_pixel);
     }
 };
 
@@ -747,13 +758,16 @@ void ScanBatcher::_parse_by_block(const uint8_t* packet_buf, LidarScan& ls) {
 
     switch (pf.block_parsable()) {
         case 16:
-            impl::foreach_field(ls, parse_field_block<16>{}, pf, packet_buf, start_col);
+            impl::foreach_field(ls, parse_field_block<16>{}, pf, packet_buf,
+                                start_col, start_pixel, end_pixel);
             break;
         case 8:
-            impl::foreach_field(ls, parse_field_block<8>{}, pf, packet_buf, start_col);
+            impl::foreach_field(ls, parse_field_block<8>{}, pf, packet_buf,
+                                start_col, start_pixel, end_pixel);
             break;
         case 4:
-            impl::foreach_field(ls, parse_field_block<4>{}, pf, packet_buf, start_col);
+            impl::foreach_field(ls, parse_field_block<4>{}, pf, packet_buf,
+                                start_col, start_pixel, end_pixel);
             break;
         default:
             throw std::invalid_argument("Invalid block dim for packet format");

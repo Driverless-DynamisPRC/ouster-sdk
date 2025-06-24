@@ -257,7 +257,8 @@ packet_format::packet_format(const sensor_info& info)
 template <typename T, typename SRC, int N>
 void packet_format::block_field_impl(Eigen::Ref<img_t<T>> field, ChanField chan,
                                      const uint8_t* packet_buf,
-                                     size_t col_offset) const {
+                                     size_t col_offset, size_t start_pixel,
+                                     size_t end_pixel) const {
     if (sizeof(T) < sizeof(SRC))
         throw std::invalid_argument("Dest type too small for specified field");
 
@@ -279,8 +280,9 @@ void packet_format::block_field_impl(Eigen::Ref<img_t<T>> field, ChanField chan,
 
         uint16_t m_id = col_measurement_id(col_buf[0]);
 
-        for (int px = 0; px < pixels_per_column; ++px) {
-            std::ptrdiff_t f_offset = cols * px + (m_id - col_offset);
+        for (size_t px = start_pixel; px < end_pixel; ++px) {
+            std::ptrdiff_t f_offset =
+                cols * (px - start_pixel) + (m_id - col_offset);
             for (int x = 0; x < N; ++x) {
                 auto px_src =
                     col_buf[x] + col_header_size + (px * channel_data_size);
@@ -297,26 +299,26 @@ void packet_format::block_field_impl(Eigen::Ref<img_t<T>> field, ChanField chan,
 template <typename T, int BlockDim,
           typename std::enable_if<std::is_unsigned<T>::value, T>::type>
 void packet_format::block_field(Eigen::Ref<img_t<T>> field, ChanField chan,
-                                const uint8_t* packet_buf,
-                                size_t col_offset) const {
+                                const uint8_t* packet_buf, size_t col_offset,
+                                size_t start_pixel, size_t end_pixel) const {
     const auto& f = impl_->fields.at(chan);
 
     switch (f.ty_tag) {
         case UINT8:
-            block_field_impl<T, uint8_t, BlockDim>(field, chan, packet_buf,
-                                                   col_offset);
+            block_field_impl<T, uint8_t, BlockDim>(
+                field, chan, packet_buf, col_offset, start_pixel, end_pixel);
             break;
         case UINT16:
-            block_field_impl<T, uint16_t, BlockDim>(field, chan, packet_buf,
-                                                    col_offset);
+            block_field_impl<T, uint16_t, BlockDim>(
+                field, chan, packet_buf, col_offset, start_pixel, end_pixel);
             break;
         case UINT32:
-            block_field_impl<T, uint32_t, BlockDim>(field, chan, packet_buf,
-                                                    col_offset);
+            block_field_impl<T, uint32_t, BlockDim>(
+                field, chan, packet_buf, col_offset, start_pixel, end_pixel);
             break;
         case UINT64:
-            block_field_impl<T, uint64_t, BlockDim>(field, chan, packet_buf,
-                                                    col_offset);
+            block_field_impl<T, uint64_t, BlockDim>(
+                field, chan, packet_buf, col_offset, start_pixel, end_pixel);
             break;
         default:
             throw std::invalid_argument("Invalid field for packet format");
@@ -325,54 +327,63 @@ void packet_format::block_field(Eigen::Ref<img_t<T>> field, ChanField chan,
 
 // explicitly instantiate for each field type / block dim
 template void packet_format::block_field<uint8_t, 4>(
-    Eigen::Ref<img_t<uint8_t>> field, ChanField chan,
-    const uint8_t* packet_buf, size_t col_offset) const;
+    Eigen::Ref<img_t<uint8_t>> field, ChanField chan, const uint8_t* packet_buf,
+    size_t col_offset, size_t start_pixel, size_t end_pixel) const;
 template void packet_format::block_field<uint16_t, 4>(
     Eigen::Ref<img_t<uint16_t>> field, ChanField chan,
-    const uint8_t* packet_buf, size_t col_offset) const;
+    const uint8_t* packet_buf, size_t col_offset, size_t start_pixel,
+    size_t end_pixel) const;
 template void packet_format::block_field<uint32_t, 4>(
     Eigen::Ref<img_t<uint32_t>> field, ChanField chan,
-    const uint8_t* packet_buf, size_t col_offset) const;
+    const uint8_t* packet_buf, size_t col_offset, size_t start_pixel,
+    size_t end_pixel) const;
 template void packet_format::block_field<uint64_t, 4>(
     Eigen::Ref<img_t<uint64_t>> field, ChanField chan,
-    const uint8_t* packet_buf, size_t col_offset) const;
+    const uint8_t* packet_buf, size_t col_offset, size_t start_pixel,
+    size_t end_pixel) const;
 template void packet_format::block_field<uint8_t, 8>(
-    Eigen::Ref<img_t<uint8_t>> field, ChanField chan,
-    const uint8_t* packet_buf, size_t col_offset) const;
+    Eigen::Ref<img_t<uint8_t>> field, ChanField chan, const uint8_t* packet_buf,
+    size_t col_offset, size_t start_pixel, size_t end_pixel) const;
 template void packet_format::block_field<uint16_t, 8>(
     Eigen::Ref<img_t<uint16_t>> field, ChanField chan,
-    const uint8_t* packet_buf, size_t col_offset) const;
+    const uint8_t* packet_buf, size_t col_offset, size_t start_pixel,
+    size_t end_pixel) const;
 template void packet_format::block_field<uint32_t, 8>(
     Eigen::Ref<img_t<uint32_t>> field, ChanField chan,
-    const uint8_t* packet_buf, size_t col_offset) const;
+    const uint8_t* packet_buf, size_t col_offset, size_t start_pixel,
+    size_t end_pixel) const;
 template void packet_format::block_field<uint64_t, 8>(
     Eigen::Ref<img_t<uint64_t>> field, ChanField chan,
-    const uint8_t* packet_buf, size_t col_offset) const;
+    const uint8_t* packet_buf, size_t col_offset, size_t start_pixel,
+    size_t end_pixel) const;
 template void packet_format::block_field<uint8_t, 16>(
-    Eigen::Ref<img_t<uint8_t>> field, ChanField chan,
-    const uint8_t* packet_buf, size_t col_offset) const;
+    Eigen::Ref<img_t<uint8_t>> field, ChanField chan, const uint8_t* packet_buf,
+    size_t col_offset, size_t start_pixel, size_t end_pixel) const;
 template void packet_format::block_field<uint16_t, 16>(
     Eigen::Ref<img_t<uint16_t>> field, ChanField chan,
-    const uint8_t* packet_buf, size_t col_offset) const;
+    const uint8_t* packet_buf, size_t col_offset, size_t start_pixel,
+    size_t end_pixel) const;
 template void packet_format::block_field<uint32_t, 16>(
     Eigen::Ref<img_t<uint32_t>> field, ChanField chan,
-    const uint8_t* packet_buf, size_t col_offset) const;
+    const uint8_t* packet_buf, size_t col_offset, size_t start_pixel,
+    size_t end_pixel) const;
 template void packet_format::block_field<uint64_t, 16>(
     Eigen::Ref<img_t<uint64_t>> field, ChanField chan,
-    const uint8_t* packet_buf, size_t col_offset) const;
+    const uint8_t* packet_buf, size_t col_offset, size_t start_pixel,
+    size_t end_pixel) const;
 
 template <typename SRC, typename DST>
 static void col_field_impl(const uint8_t* col_buf, DST* dst, size_t offset,
-                           uint64_t mask, int shift, int pixels_per_column,
-                           int dst_stride, size_t channel_data_size,
-                           size_t col_header_size) {
+                           uint64_t mask, int shift, int dst_stride,
+                           size_t start_pixel, size_t end_pixel,
+                           size_t channel_data_size, size_t col_header_size) {
     if (sizeof(DST) < sizeof(SRC))
         throw std::invalid_argument("Dest type too small for specified field");
 
-    for (int px = 0; px < pixels_per_column; px++) {
+    for (size_t px = start_pixel; px < end_pixel; px++) {
         auto px_src =
             col_buf + col_header_size + offset + (px * channel_data_size);
-        DST* px_dst = dst + px * dst_stride;
+        DST* px_dst = dst + (px - start_pixel) * dst_stride;
         DST dst = *reinterpret_cast<const SRC*>(px_src);
         if (mask) dst &= mask;
         if (shift > 0) dst >>= shift;
@@ -384,29 +395,38 @@ static void col_field_impl(const uint8_t* col_buf, DST* dst, size_t offset,
 template <typename T,
           typename std::enable_if<std::is_unsigned<T>::value, T>::type>
 void packet_format::col_field(const uint8_t* col_buf, ChanField i, T* dst,
+                              size_t start_pixel, size_t end_pixel,
                               int dst_stride) const {
+    if (!(start_pixel <= end_pixel &&
+          end_pixel <= static_cast<size_t>(pixels_per_column)))
+        throw std::invalid_argument("Invalid start_pixel or end_pixel");
+
     const auto& f = impl_->fields.at(i);
 
     switch (f.ty_tag) {
         case UINT8:
-            col_field_impl<uint8_t, T>(
-                col_buf, dst, f.offset, f.mask, f.shift, pixels_per_column,
-                dst_stride, impl_->channel_data_size, impl_->col_header_size);
+            col_field_impl<uint8_t, T>(col_buf, dst, f.offset, f.mask, f.shift,
+                                       dst_stride, start_pixel, end_pixel,
+                                       impl_->channel_data_size,
+                                       impl_->col_header_size);
             break;
         case UINT16:
-            col_field_impl<uint16_t, T>(
-                col_buf, dst, f.offset, f.mask, f.shift, pixels_per_column,
-                dst_stride, impl_->channel_data_size, impl_->col_header_size);
+            col_field_impl<uint16_t, T>(col_buf, dst, f.offset, f.mask, f.shift,
+                                        dst_stride, start_pixel, end_pixel,
+                                        impl_->channel_data_size,
+                                        impl_->col_header_size);
             break;
         case UINT32:
-            col_field_impl<uint32_t, T>(
-                col_buf, dst, f.offset, f.mask, f.shift, pixels_per_column,
-                dst_stride, impl_->channel_data_size, impl_->col_header_size);
+            col_field_impl<uint32_t, T>(col_buf, dst, f.offset, f.mask, f.shift,
+                                        dst_stride, start_pixel, end_pixel,
+                                        impl_->channel_data_size,
+                                        impl_->col_header_size);
             break;
         case UINT64:
-            col_field_impl<uint64_t, T>(
-                col_buf, dst, f.offset, f.mask, f.shift, pixels_per_column,
-                dst_stride, impl_->channel_data_size, impl_->col_header_size);
+            col_field_impl<uint64_t, T>(col_buf, dst, f.offset, f.mask, f.shift,
+                                        dst_stride, start_pixel, end_pixel,
+                                        impl_->channel_data_size,
+                                        impl_->col_header_size);
             break;
         default:
             throw std::invalid_argument("Invalid field for packet format");
@@ -415,13 +435,13 @@ void packet_format::col_field(const uint8_t* col_buf, ChanField i, T* dst,
 
 // explicitly instantiate for each field type
 template void packet_format::col_field(const uint8_t*, ChanField, uint8_t*,
-                                       int) const;
+                                       size_t, size_t, int) const;
 template void packet_format::col_field(const uint8_t*, ChanField, uint16_t*,
-                                       int) const;
+                                       size_t, size_t, int) const;
 template void packet_format::col_field(const uint8_t*, ChanField, uint32_t*,
-                                       int) const;
+                                       size_t, size_t, int) const;
 template void packet_format::col_field(const uint8_t*, ChanField, uint64_t*,
-                                       int) const;
+                                       size_t, size_t, int) const;
 
 ChanFieldType packet_format::field_type(ChanField f) const {
     return impl_->fields.count(f) ? impl_->fields.at(f).ty_tag

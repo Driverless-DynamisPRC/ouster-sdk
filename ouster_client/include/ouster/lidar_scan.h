@@ -528,6 +528,8 @@ class ScanBatcher {
     int64_t finished_scan_id = -1;
     size_t start_col;
     size_t end_col;
+    size_t start_pixel;
+    size_t end_pixel;
 
     void _parse_by_col(const uint8_t* packet_buf, LidarScan& ls);
     void _parse_by_block(const uint8_t* packet_buf, LidarScan& ls);
@@ -550,7 +552,8 @@ class ScanBatcher {
      *
      * @param[in] info sensor metadata returned from the client.
      */
-    ScanBatcher(const sensor::sensor_info& info);
+    ScanBatcher(const sensor::sensor_info& info, size_t start_pixel,
+                size_t end_pixel);
 
     size_t get_w() const { return w; }
     size_t get_h() const { return h; }
