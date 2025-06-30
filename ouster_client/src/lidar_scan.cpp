@@ -529,7 +529,7 @@ ScanBatcher::ScanBatcher(size_t w, const sensor::packet_format& pf)
 ScanBatcher::ScanBatcher(const sensor::sensor_info& info, size_t start_pixel,
                          size_t end_pixel)
     : ScanBatcher(
-          info.format.columns_per_packet * get_expected_packets(info),
+          info.format.column_window.second - info.format.column_window.first,
           sensor::get_format(info)) {
     h = end_pixel - start_pixel;
 
@@ -582,7 +582,7 @@ struct parse_field_col {
         if (f == ChanField::RAW_HEADERS) return;
 
         pf.col_field(col_buf, f, field.col(m_id - col_offset).data(),
-                     field.cols(), start_pixel, end_pixel);
+                     start_pixel, end_pixel, field.cols());
     }
 };
 
@@ -662,7 +662,7 @@ void ScanBatcher::_parse_by_col(const uint8_t* packet_buf, LidarScan& ls) {
         const bool valid = (status & 0x01);
 
         // drop out-of-bounds data in case of misconfiguration
-        if (m_id >= w) continue;
+        if (m_id - start_col >= w) continue;
 
         if (raw_headers) {
             // zero out missing columns if we jumped forward
@@ -869,7 +869,7 @@ bool ScanBatcher::operator()(const uint8_t* packet_buf, uint64_t packet_ts,
         const uint32_t status = pf.col_status(col_buf);
         const bool valid = (status & 0x01);
 
-        if (!valid || (m_id - start_col) >= w) {
+        if (!valid || m_id - start_col >= w) {
             happy_packet = false;
             break;
         }
