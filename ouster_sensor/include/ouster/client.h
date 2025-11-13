@@ -291,6 +291,26 @@ std::string get_metadata(Client& cli,
                          int timeout_sec = LONG_HTTP_REQUEST_TIMEOUT_SECONDS);
 
 /**
+ * Get metadata text blob from the sensor.
+ *
+ * Will attempt to fetch from the network if not already populated.
+ *
+ * @throw runtime_error if the sensor is in ERROR state, the firmware version
+ * used to initialize the HTTP or TCP client is invalid, the metadata could
+ * not be retrieved from the sensor within the timeout period,
+ * a timeout occured while waiting for the sensor to finish initializing,
+ * or the response could not be parsed.
+ *
+ * @param[in] hostname sensor hostname.
+ * @param[in] timeout_sec how long to wait for the sensor to initialize.
+ *
+ * @return a text blob of metadata parseable into a sensor_info struct.
+ */
+OUSTER_API_FUNCTION
+std::string get_metadata(const std::string& hostname,
+                         int timeout_sec = LONG_HTTP_REQUEST_TIMEOUT_SECONDS);
+
+/**
  * Get sensor config from the sensor.
  *
  * Populates passed in config with the results of get_config.

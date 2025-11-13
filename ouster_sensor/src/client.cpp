@@ -400,9 +400,13 @@ bool set_config(const std::string& hostname, const SensorConfig& config,
 }
 
 std::string get_metadata(Client& cli, int timeout_sec) {
+    return get_metadata(cli.hostname, timeout_sec);
+}
+
+std::string get_metadata(const std::string& hostname, int timeout_sec) {
     // Note, this function calls functions that throw std::runtime_error
     // on timeout.
-    auto sensor_http = SensorHttp::create(cli.hostname, timeout_sec);
+    auto sensor_http = SensorHttp::create(hostname, timeout_sec);
     std::string meta;
     try {
         auto temp_data = collect_metadata(*sensor_http, timeout_sec);
